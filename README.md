@@ -87,6 +87,7 @@ python3 ~/.claude/skills/super-rami/scripts/autotrader.py ibkr
 | `stop_loss_pct` / `take_profit_pct` | 50% / 100% من سعر الدخول |
 | `max_trades_per_day` | 3 |
 | `max_daily_loss_pct` | 10% = 100$، بعدها يوقف الدخول لنهاية اليوم |
+| `extra_otm_pts` | 15: إذا العقد أغلى من الحد، يبعد الـ strike لين 15 نقطة زيادة |
 | `max_spread_pct` | 15% |
 | `start` / `last_entry` / `flatten` | 09:45 / 15:30 / 15:50 بتوقيت نيويورك |
 

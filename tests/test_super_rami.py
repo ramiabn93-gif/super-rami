@@ -464,3 +464,20 @@ class TestSpxCapital(unittest.TestCase):
         self.assertEqual((c["max_premium_usd"], c["max_daily_loss_usd"]), (200, 100))
         c = autotrader.resolve(dict(autotrader.DEFAULTS, account_usd=5000))
         self.assertEqual((c["max_premium_usd"], c["max_daily_loss_usd"]), (1000, 500))
+
+
+class TestPickContract(unittest.TestCase):
+    def test_moves_further_otm_when_expensive(self):
+        cfg = autotrader.resolve(autotrader.DEFAULTS)            # 200$ limit -> ask <= 2.00
+        b = autotrader.SimBroker(synth.make())
+        prices = {5015: 3.5, 5020: 2.6, 5025: 1.8, 5030: 1.2}
+        b.quote = lambda c: (prices[c["strike"]] - 0.1, prices[c["strike"]])
+        _, strike, _, ask = autotrader.pick_contract(b, cfg, {"strike": 5015}, "C", "20261104")
+        self.assertEqual((strike, ask), (5025, 1.8))
+
+    def test_stops_at_extra_otm_limit(self):
+        cfg = autotrader.resolve(dict(autotrader.DEFAULTS, extra_otm_pts=5))
+        b = autotrader.SimBroker(synth.make())
+        b.quote = lambda c: (4.9, 5.0)
+        _, strike, _, _ = autotrader.pick_contract(b, cfg, {"strike": 4985}, "P", "20261104")
+        self.assertEqual(strike, 4980)                            # puts move down

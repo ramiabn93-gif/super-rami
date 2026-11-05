@@ -41,6 +41,7 @@ DEFAULTS = {
     "max_premium_pct": 20,        # max cost of one trade, % of account (1000 -> 200$)
     "max_daily_loss_pct": 10,     # stop for the day after losing this % (1000 -> 100$)
     "max_premium_usd": None,      # optional fixed override of max_premium_pct
+    "extra_otm_pts": 15,          # if the contract is too expensive, move up to this many points further OTM
     "max_daily_loss_usd": None,   # optional fixed override of max_daily_loss_pct
     "stop_loss_pct": 50,          # exit if premium falls this % from entry
     "take_profit_pct": 100,       # exit if premium rises this % from entry
@@ -260,15 +261,31 @@ def trade_loop(broker, cfg, scfg, persist=True):
     return state
 
 
+def pick_contract(broker, cfg, sig, right, expiry):
+    """Start at the strategy's OTM strike; if it costs more than the limit,
+    step further OTM (5 points at a time) up to extra_otm_pts. Returns (contract, strike, bid, ask)."""
+    step = 5 if right == "C" else -5
+    budget = cfg["max_premium_usd"] / (100 * cfg["qty"])
+    strike = sig["strike"]
+    for k in range(int(cfg["extra_otm_pts"] // 5) + 1):
+        s = strike + k * step
+        c = broker.contract(right, s, expiry)
+        bid, ask = broker.quote(c)
+        if ask and ask <= budget:
+            return c, s, bid, ask
+    return c, s, bid, ask                 # the gate will explain why it's too expensive
+
+
 def handle_signal(broker, cfg, state, sig, now):
     right = "C" if sig["side"] == "CALL" else "P"
     head = f"إشارة {sig['side']} عند {sig['price']:,.2f} → SPXW {sig['strike']}{right}"
     try:
-        c = broker.contract(right, sig["strike"], now.strftime("%Y%m%d"))
-        bid, ask = broker.quote(c)
+        c, strike, bid, ask = pick_contract(broker, cfg, sig, right, now.strftime("%Y%m%d"))
     except RamiError as e:
         log(f"⚠️ {head} — {e}", now)
         return
+    if strike != sig["strike"]:
+        head += f" (العقد غالي، نقلته لـ {strike}{right})"
     reasons = gate(state, cfg, now, ask, bid, broker.open_positions())
     if reasons:
         log(f"⏭️ {head} — تجاهلتها: " + " ".join(reasons), now)
