@@ -7,6 +7,7 @@
 | نسخ محافظ كبار المستثمرين من تقارير 13F (Buffett، Burry، Ackman…) | `copycat.py` |
 | تحليل فني لأي سهم أمريكي أو سعودي | `analyze.py` |
 | تقسيم الميزانية بحد أعلى لكل سهم وكاش احتياطي | `budget.py` |
+| يختار لك أفضل الأسهم بنفسه (أمريكي أو سعودي) | `picker.py` |
 | قواعد مخاطر تفحص كل أمر | `risk.py` |
 | محفظة وهمية بالدولار والريال | `paper.py` |
 | استراتيجية SPX Smart Rally: إشارات وباك تست | `strategy.py` |
@@ -95,6 +96,8 @@ python3 ~/.claude/skills/super-rami/scripts/autotrader.py ibkr
 - **التداول الحقيقي:** يحتاج تغيّر `mode` إلى `live` بنفسك، وتكتب في الطرفية `export SUPER_RAMI_LIVE=I_UNDERSTAND`.
 
 ## بوت العملات الرقمية (باينانس)
+
+**يختار العملات بنفسه:** كل يوم يفحص أكثر العملات تداولاً في باينانس، ويختبر الاستراتيجيات الخمس على كل وحدة، ويحتفظ بأفضل 5 عملات قوية وأفضل 3 ميمز، مع أنسب استراتيجية لكل عملة. وتقدر تشغّل الاختيار يدوياً بـ `crypto_bot.py autopick`.
 
 ```bash
 python3 ~/.claude/skills/super-rami/scripts/crypto_bot.py backtest --days 30 --apply

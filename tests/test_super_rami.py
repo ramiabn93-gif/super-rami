@@ -481,3 +481,50 @@ class TestPickContract(unittest.TestCase):
         b.quote = lambda c: (4.9, 5.0)
         _, strike, _, _ = autotrader.pick_contract(b, cfg, {"strike": 4985}, "P", "20261104")
         self.assertEqual(strike, 4980)                            # puts move down
+
+
+# ---------------------------------------------------------------- auto pick
+import picker  # noqa: E402
+
+
+class TestStockPicker(unittest.TestCase):
+    def test_uptrend_only_and_weights(self):
+        up = [100 * (1.002 ** i) for i in range(260)]
+        down = [100 * (0.998 ** i) for i in range(260)]
+        rnd = random.Random(5)
+        choppy_up = [100 * (1.0015 ** i) * (1 + rnd.gauss(0, 0.02)) for i in range(260)]
+        smooth_up = [p * (1 + 0.003 * ((-1) ** i)) for i, p in enumerate(up)]  # tiny noise so vol > 0
+        ms = [picker.evaluate("A", smooth_up), picker.evaluate("B", down), picker.evaluate("C", choppy_up)]
+        self.assertFalse(ms[1]["uptrend"])
+        chosen = picker.pick(ms, 5)
+        self.assertNotIn("B", [m["symbol"] for m in chosen])
+        self.assertAlmostEqual(sum(m["weight"] for m in chosen), 100, delta=0.2)
+        self.assertEqual(chosen[0]["symbol"], "A")                 # smoother trend ranks first
+
+    def test_not_enough_data(self):
+        self.assertIsNone(picker.evaluate("X", [1.0] * 100))
+
+
+class TestCryptoAutopick(unittest.TestCase):
+    def test_candidates_split_and_filters(self):
+        t = [{"symbol": "BTCUSDT", "quoteVolume": "9e9"}, {"symbol": "PEPEUSDT", "quoteVolume": "5e8"},
+             {"symbol": "USDCUSDT", "quoteVolume": "9e9"}, {"symbol": "ETHBTC", "quoteVolume": "9e9"},
+             {"symbol": "TINYUSDT", "quoteVolume": "1e5"}, {"symbol": "SOLUSDT", "quoteVolume": "2e9"}]
+        strong, memes = crypto_bot.candidates(t)
+        self.assertEqual(strong, ["BTCUSDT", "SOLUSDT"])
+        self.assertEqual(memes, ["PEPEUSDT"])
+
+    def test_autopick_keeps_only_profitable(self):
+        cfg = crypto_bot.ccfg()
+        cfg.update(autopick_strong=1, autopick_memes=1)
+        t = [{"symbol": s, "quoteVolume": "1e9"} for s in ("BTCUSDT", "ETHUSDT", "DOGEUSDT")]
+        data = {"BTCUSDT": crypto_bars(3000, seed=11, drift=0.0004), "ETHUSDT": crypto_bars(3000, seed=12),
+                "DOGEUSDT": crypto_bars(3000, seed=13, drift=-0.0004)}
+        pk = crypto_bot.autopick(cfg, t, lambda s: data[s])
+        self.assertLessEqual(len(pk["strong"]), 1)
+        self.assertLessEqual(len(pk["memes"]), 1)
+        for s in pk["strong"] + pk["memes"]:
+            r = next(r for r in pk["report"] if r["symbol"] == s)
+            self.assertTrue(r["ok"] and r["return"] > 0)
+            self.assertIn(pk["assign"][s], cs.STRATEGIES)
+        self.assertEqual(len(pk["report"]), 3)

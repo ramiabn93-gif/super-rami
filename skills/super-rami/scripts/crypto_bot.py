@@ -42,6 +42,10 @@ DEFAULTS = {
     "memes": ["DOGEUSDT", "PEPEUSDT", "SHIBUSDT", "WIFUSDT", "BONKUSDT"],
     "default_strategy": {"strong": "trend", "memes": "breakout"},
     "assign": {},                   # symbol -> strategy (backtest --apply fills this)
+    "autopick_daily": True,         # let the bot choose coins itself once a day
+    "autopick_strong": 5,           # how many strong coins to keep
+    "autopick_memes": 3,            # how many meme coins to keep
+    "autopick_days": 30,            # backtest window used to choose
     "params": {},                   # overrides of crypto_strategies.DEFAULT_PARAMS
 }
 INTERVAL_MS = {"1m": 60e3, "5m": 300e3, "15m": 900e3, "30m": 1800e3, "1h": 3600e3, "4h": 14400e3}
@@ -76,6 +80,75 @@ def daily_loss_limit(cfg):
     if cfg["max_daily_loss_usdt"]:
         return float(cfg["max_daily_loss_usdt"])
     return float(cfg["per_trade_usdt"] or 0) * 0.15 * 3 if cfg["per_trade_usdt"] else 0.0
+
+
+MEME_BASES = {"DOGE", "SHIB", "PEPE", "WIF", "BONK", "FLOKI", "BOME", "MEME", "PEOPLE", "TURBO",
+              "NEIRO", "PNUT", "TRUMP", "1000SATS", "1MBABYDOGE", "BRETT", "POPCAT", "MOG", "DOGS"}
+STABLES = {"USDC", "FDUSD", "TUSD", "DAI", "USDP", "BUSD", "EUR", "AEUR", "USDE", "USD1", "PAXG", "WBTC", "XUSD"}
+
+
+def candidates(tickers, n_strong=15, n_meme=8, min_volume=20e6):
+    """From Binance 24h tickers pick liquid USDT pairs, split into strong and meme."""
+    rows = []
+    for t in tickers:
+        s = t["symbol"]
+        if not s.endswith("USDT"):
+            continue
+        base = s[:-4]
+        if base in STABLES or base.endswith(("UP", "DOWN", "BULL", "BEAR")):
+            continue
+        qv = float(t.get("quoteVolume", 0))
+        if qv < min_volume:
+            continue
+        rows.append((qv, s, base in MEME_BASES))
+    rows.sort(reverse=True)
+    strong = [s for _, s, m in rows if not m][:n_strong]
+    memes = [s for _, s, m in rows if m][:n_meme]
+    return strong, memes
+
+
+def autopick(cfg, tickers, history_fn):
+    """Backtest every candidate on the 5 strategies; keep the best coins."""
+    p = params(cfg)
+    fee = 0.1 if cfg["market"] == "spot" else 0.05
+    strong, memes = candidates(tickers)
+    picked = {"strong": [], "memes": [], "assign": {}, "report": []}
+    for group, syms, n in (("strong", strong, cfg["autopick_strong"]), ("memes", memes, cfg["autopick_memes"])):
+        scored = []
+        for sym in syms:
+            try:
+                bars = history_fn(sym)
+            except RamiError:
+                continue
+            res = max((cs.backtest(bars, name, p, fee, cfg["market"] == "futures", sym) for name in cs.STRATEGIES),
+                      key=cs.score)
+            ok = res["trades"] >= 5 and res["total_return"] > 0 and res["profit_factor"] >= 1.1
+            picked["report"].append({"symbol": sym, "group": group, "strategy": res["strategy"], "ok": ok,
+                                     "return": round(res["total_return"], 1), "trades": res["trades"],
+                                     "win_rate": round(res["win_rate"]), "max_dd": round(res["max_dd"], 1)})
+            if ok:
+                scored.append((cs.score(res), sym, res["strategy"]))
+        scored.sort(reverse=True)
+        for _, sym, name in scored[:n]:
+            picked[group].append(sym)
+            picked["assign"][sym] = name
+    return picked
+
+
+def run_autopick(cfg, save=True):
+    per_day = 86400e3 / INTERVAL_MS[cfg["interval"]]
+    url = ("https://api.binance.com/api/v3/ticker/24hr" if cfg["market"] == "spot"
+           else "https://fapi.binance.com/fapi/v1/ticker/24hr")
+    tickers = bn._request("GET", url)
+    picked = autopick(cfg, tickers, lambda s: bn.history(s, cfg["interval"],
+                                                         int(cfg["autopick_days"] * per_day) + 250, cfg["market"]))
+    if save and (picked["strong"] or picked["memes"]):
+        full = load_config()
+        c = full.setdefault("crypto", {})
+        c.update(strong=picked["strong"], memes=picked["memes"], assign=picked["assign"],
+                 last_autopick=dt.datetime.now(dt.timezone.utc).date().isoformat())
+        save_config(full)
+    return picked
 
 
 def kill_path():
@@ -162,7 +235,7 @@ class Bot:
         if os.path.exists(kill_path()):
             self.flatten("مفتاح الإيقاف")
             return False
-        for sym in watchlist(self.cfg):
+        for sym in list(dict.fromkeys(watchlist(self.cfg) + list(self.state["positions"]))):
             try:
                 self.check_symbol(sym)
             except RamiError as e:
@@ -329,7 +402,20 @@ def cmd_run(a, cfg):
         notify("ℹ️ ما حددت الميزانية، فبرسل تنبيهات بس لين تحددها: crypto_bot.py set per_trade_usdt 50")
     bot = Bot(cfg)
     try:
-        while bot.step():
+        while True:
+            today = dt.datetime.now(dt.timezone.utc).date().isoformat()
+            if cfg["autopick_daily"] and load_config().get("crypto", {}).get("last_autopick") != today:
+                notify("🔎 أختار العملات لليوم...")
+                try:
+                    pk = run_autopick(cfg)
+                    cfg = ccfg()
+                    bot.cfg = cfg
+                    notify("🎯 عملات اليوم — قوية: " + ("، ".join(pk["strong"]) or "ولا وحدة") +
+                           " | ميمز: " + ("، ".join(pk["memes"]) or "ولا وحدة"))
+                except RamiError as e:
+                    notify(f"⚠️ تعذر الاختيار التلقائي، بكمل بالقائمة الحالية: {e}")
+            if not bot.step():
+                break
             time.sleep(20)
     except KeyboardInterrupt:
         notify("⏹️ أوقفته يدوياً. الصفقات المفتوحة باقية.")
@@ -369,6 +455,7 @@ def main():
     p.add_argument("--csv", help="بيانات عملة وحدة: time,open,high,low,close,volume")
     p.add_argument("--apply", action="store_true", help="احفظ الأفضل لكل عملة")
     sub.add_parser("scan")
+    sub.add_parser("autopick", help="خل البوت يختار العملات بنفسه")
     sub.add_parser("run")
     sub.add_parser("positions")
     sub.add_parser("rules")
@@ -386,6 +473,16 @@ def main():
         cmd_backtest(a, cfg)
     elif a.cmd == "scan":
         cmd_scan(a, cfg)
+    elif a.cmd == "autopick":
+        pk = run_autopick(cfg)
+        print(f"{'العملة':<12}{'النوع':<7}{'أفضل استراتيجية':<22}{'العائد':>9}{'صفقات':>7}{'نجاح':>7}{'تراجع':>8}")
+        for r in sorted(pk["report"], key=lambda r: (r["group"], -r["return"])):
+            mark = "✅" if r["symbol"] in pk["assign"] else "  "
+            print(f"{mark}{r['symbol']:<10}{'قوية' if r['group'] == 'strong' else 'ميمز':<7}"
+                  f"{cs.NAMES_AR[r['strategy']]:<22}{r['return']:>+8.1f}%{r['trades']:>7}{r['win_rate']:>6}%{r['max_dd']:>7.1f}%")
+        print("\n🎯 اخترت — قوية: " + ("، ".join(pk["strong"]) or "ولا وحدة") +
+              " | ميمز: " + ("، ".join(pk["memes"]) or "ولا وحدة"))
+        print("الاختيار على آخر " + str(cfg["autopick_days"]) + " يوم. نتائج الماضي ما تضمن المستقبل.")
     elif a.cmd == "run":
         cmd_run(a, cfg)
     elif a.cmd == "set":
