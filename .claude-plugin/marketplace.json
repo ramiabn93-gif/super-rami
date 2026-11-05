@@ -1,0 +1,11 @@
+{
+  "name": "super-rami",
+  "owner": { "name": "Rami" },
+  "plugins": [
+    {
+      "name": "super-rami",
+      "source": "./",
+      "description": "مساعد شخصي للأسهم الأمريكية والسعودية مع محفظة وهمية."
+    }
+  ]
+}
