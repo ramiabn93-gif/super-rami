@@ -261,3 +261,198 @@ class TestIBKRSafety(unittest.TestCase):
             self.mod.IBKRBroker(dict(autotrader.DEFAULTS, mode="live"))
         os.environ["SUPER_RAMI_LIVE"] = "I_UNDERSTAND"
         self.assertFalse(self.mod.IBKRBroker(dict(autotrader.DEFAULTS, mode="live")).is_paper)
+
+
+# ---------------------------------------------------------------- crypto
+import random  # noqa: E402
+
+import binance_client as bn  # noqa: E402
+import crypto_bot  # noqa: E402
+import crypto_strategies as cs  # noqa: E402
+
+T0 = 1_762_300_800_000  # 2025-11-05 00:00 UTC
+STEP = 900_000           # 15m
+
+
+def crypto_bars(n=600, seed=1, drift=0.0):
+    rnd, p, out = random.Random(seed), 100.0, []
+    for i in range(n):
+        o = p
+        p = max(p * (1 + drift + rnd.gauss(0, 0.004)), 0.01)
+        out.append({"t": T0 + i * STEP, "o": o, "h": max(o, p) * 1.002, "l": min(o, p) * 0.998,
+                    "c": p, "v": 1000 + rnd.random() * 200, "close_t": T0 + (i + 1) * STEP - 1})
+    return out
+
+
+class TestBinanceClient(unittest.TestCase):
+    def test_signature_vector_from_binance_docs(self):
+        secret = "NhqPtmdSJYdKjVHjA7PZj4Mge3R5YNiP1e3UZjInClVN65XAbvqqM6A7H5fATj0j"
+        q = "symbol=LTCBTC&side=BUY&type=LIMIT&timeInForce=GTC&quantity=1&price=0.1&recvWindow=5000&timestamp=1499827319559"
+        self.assertEqual(bn.sign(secret, q), "c8db56825ae71d6d79447849e617115f4a920fa2acdcab2b053c4b2838bd6b71")
+
+    def test_floor_step(self):
+        self.assertEqual(bn.floor_step(1.23456, 0.001), 1.234)
+        self.assertEqual(bn.floor_step(123456.7, 1), 123456)
+
+    def test_klines_parse_and_paging(self):
+        calls = []
+
+        def http(method, url, **k):
+            calls.append(url)
+            end = int(urllib_parse.parse_qs(urllib_parse.urlparse(url).query).get("endTime", [T0 + 2000 * STEP])[0])
+            start = end - 1000 * STEP
+            return [[t, "1", "2", "0.5", "1.5", "10", t + STEP - 1] for t in range(start, end, STEP)][-1000:]
+        bars = bn.history("BTCUSDT", "15m", 1500, http=http)
+        self.assertEqual(len(bars), 1500)
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(all(b["t"] < c["t"] for b, c in zip(bars, bars[1:])))
+
+    def test_no_keys_refused(self):
+        os.environ.pop("BINANCE_API_KEY", None)
+        os.environ.pop("BINANCE_API_SECRET", None)
+        with self.assertRaises(common.RamiError):
+            bn.Binance().signed("GET", "/api/v3/account")
+
+
+import urllib.parse as urllib_parse  # noqa: E402
+
+
+class TestCryptoStrategies(unittest.TestCase):
+    def setUp(self):
+        self.p = dict(cs.DEFAULT_PARAMS)
+
+    def test_breakout_signal(self):
+        bars = crypto_bars(400)
+        last = bars[-1]
+        bars.append({"t": last["t"] + STEP, "o": last["c"], "h": last["c"] * 1.06, "l": last["c"],
+                     "c": last["c"] * 1.05, "v": 10000, "close_t": last["t"] + 2 * STEP - 1})
+        ind = cs.Ind(bars, self.p)
+        self.assertEqual(cs.signal("breakout", bars, ind, len(bars) - 1, self.p), 1)
+        self.assertEqual(cs.signal("momentum", bars, ind, len(bars) - 1, self.p), 1)
+
+    def test_all_strategies_backtest_run(self):
+        bars = crypto_bars(2000, seed=3, drift=0.0003)
+        for n in cs.STRATEGIES:
+            r = cs.backtest(bars, n, self.p, 0.1, True)
+            self.assertGreaterEqual(r["trades"], 0)
+            self.assertLessEqual(r["max_dd"], 100)
+
+    def test_stop_and_trailing(self):
+        bars = crypto_bars(300)
+        ind = cs.Ind(bars, self.p)
+        pos = cs.new_position("X", "breakout", 1, 100.0, 1.0, bars[250]["t"], self.p)
+        self.assertEqual(pos["stop"], 98.0)
+        self.assertEqual(cs.stop_hit(pos, {"o": 99, "h": 99, "l": 97.5, "c": 98}), 98.0)
+        self.assertEqual(cs.stop_hit(pos, {"o": 96, "h": 96, "l": 95, "c": 95}), 96)   # gap
+        pos["best"] = 110.0
+        ind.atr[260] = 1.0
+        cs.manage(pos, bars, ind, 260, self.p)
+        self.assertEqual(pos["stop"], 108.0)                                              # trailed
+
+    def test_max_hold(self):
+        bars = crypto_bars(700)
+        ind = cs.Ind(bars, self.p)
+        pos = cs.new_position("X", "breakout", 1, bars[300]["c"], 0.0001, bars[300]["t"], self.p)
+        pos["stop"] = 0
+        why = None
+        for i in range(301, 700):
+            why = cs.manage(pos, bars, ind, i, self.p)
+            if why and "أقصى" in why:
+                break
+        self.assertLessEqual((bars[i]["t"] - bars[300]["t"]) / 86400e3, 3.01)
+
+
+class FakeClient:
+    def __init__(self):
+        self.orders = []
+        self.px = 100.0
+
+    def price(self, s):
+        return self.px
+
+    def open(self, s, side, usdt, lev=1):
+        self.orders.append(("open", s, side, usdt))
+        return usdt / self.px, self.px
+
+    def close(self, s, side, qty):
+        self.orders.append(("close", s, side, qty))
+        return self.px
+
+    def set_stop(self, *a):
+        self.orders.append(("stop",) + a)
+
+
+class TestCryptoBot(unittest.TestCase):
+    def make(self, **over):
+        cfg = crypto_bot.ccfg()
+        cfg.update(strong=["BTCUSDT"], memes=["PEPEUSDT"], **over)
+        self.bars = crypto_bars(400)
+        self.t = [self.bars[-1]["close_t"] + 1]
+        self.client = FakeClient()
+        self.client.px = self.bars[-1]["c"]
+        bot = crypto_bot.Bot(cfg, client=self.client, fetch=lambda s: self.bars, now=lambda: self.t[0])
+        bot.state = {"positions": {}, "daily": {}, "last_bar": {}}
+        return bot
+
+    def force_signal(self, side):
+        orig = cs.signal
+        cs.signal = lambda *a, **k: side
+        self.addCleanup(setattr, cs, "signal", orig)
+
+    def test_alert_mode_never_orders(self):
+        bot = self.make(entry_mode="alert", exit_mode="alert")
+        self.force_signal(1)
+        bot.step()
+        self.assertIn("BTCUSDT", bot.state["positions"])
+        self.assertFalse(bot.state["positions"]["BTCUSDT"]["auto"])
+        self.assertEqual(self.client.orders, [])
+
+    def test_auto_without_budget_falls_back_to_alert(self):
+        bot = self.make(entry_mode="auto", per_trade_usdt=None)
+        self.force_signal(1)
+        bot.step()
+        self.assertEqual(self.client.orders, [])
+
+    def test_auto_entry_and_auto_stop_exit(self):
+        bot = self.make(entry_mode="auto", exit_mode="auto", per_trade_usdt=100)
+        self.force_signal(1)
+        bot.step()
+        opens = [o for o in self.client.orders if o[0] == "open"]
+        self.assertEqual([(o[1], o[3]) for o in opens], [("BTCUSDT", 100.0), ("PEPEUSDT", 50.0)])  # memes half
+        stop = bot.state["positions"]["BTCUSDT"]["stop"]
+        self.client.px = stop * 0.99                     # price falls through the stop
+        self.t[0] += 60_000
+        bot.step()
+        self.assertNotIn("BTCUSDT", bot.state["positions"])
+        self.assertTrue(any(o[0] == "close" and o[1] == "BTCUSDT" for o in self.client.orders))
+        self.assertLess(bot.state["daily"][bot.today()], 0)
+
+    def test_spot_ignores_shorts(self):
+        bot = self.make(entry_mode="auto", per_trade_usdt=100, market="spot")
+        self.force_signal(-1)
+        bot.step()
+        self.assertEqual(bot.state["positions"], {})
+
+    def test_max_open_positions(self):
+        bot = self.make(entry_mode="auto", per_trade_usdt=100, max_open_positions=1)
+        self.force_signal(1)
+        bot.step()
+        self.assertEqual(len([o for o in self.client.orders if o[0] == "open"]), 1)
+
+    def test_kill_switch_flattens(self):
+        bot = self.make(entry_mode="auto", exit_mode="auto", per_trade_usdt=100)
+        self.force_signal(1)
+        bot.step()
+        open(crypto_bot.kill_path(), "w").close()
+        try:
+            self.assertFalse(bot.step())
+            self.assertEqual(bot.state["positions"], {})
+        finally:
+            os.remove(crypto_bot.kill_path())
+
+    def test_live_requires_env(self):
+        cfg = crypto_bot.ccfg()
+        with self.assertRaises(common.RamiError):
+            crypto_bot.check_config(dict(cfg, testnet=False))
+        with self.assertRaises(common.RamiError):
+            crypto_bot.check_config(dict(cfg, leverage=20))

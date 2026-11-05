@@ -92,6 +92,46 @@ python3 ~/.claude/skills/super-rami/scripts/autotrader.py ibkr
 - **إيقاف فوري:** `autotrader.py stop` يقفل كل الصفقات ويوقف البوت.
 - **التداول الحقيقي:** يحتاج تغيّر `mode` إلى `live` بنفسك، وتكتب في الطرفية `export SUPER_RAMI_LIVE=I_UNDERSTAND`.
 
+## بوت العملات الرقمية (باينانس)
+
+```bash
+python3 ~/.claude/skills/super-rami/scripts/crypto_bot.py backtest --days 30 --apply
+```
+
+```bash
+python3 ~/.claude/skills/super-rami/scripts/crypto_bot.py run
+```
+
+| الإعداد | الافتراضي | المعنى |
+|---|---|---|
+| `market` | `spot` | `spot` للسبوت أو `futures` للعقود الآجلة (يدعم البيع على المكشوف) |
+| `testnet` | `true` | الحساب التجريبي. الحقيقي يحتاج `false` و `export SUPER_RAMI_LIVE=I_UNDERSTAND` |
+| `entry_mode` / `exit_mode` | `alert` | `auto` ينفذ بنفسه، و`alert` يرسل لك تنبيه |
+| `per_trade_usdt` | فاضي | مبلغ الصفقة. لين تحدده التنفيذ التلقائي مقفول |
+| `total_budget_usdt` | فاضي | الميزانية الكلية |
+| `meme_size_mult` | 0.5 | الميمز بنص المبلغ |
+| `leverage` / `max_leverage` | 1 / 5 | الرافعة للعقود الآجلة |
+| `max_open_positions` | 3 | أقصى عدد صفقات مفتوحة |
+| `strong` / `memes` | BTC وETH وSOL وBNB وXRP / DOGE وPEPE وSHIB وWIF وBONK | قوائم العملات |
+
+مثال لتغيير إعداد:
+
+```bash
+python3 ~/.claude/skills/super-rami/scripts/crypto_bot.py set per_trade_usdt 50
+```
+
+**مفاتيح باينانس:** سوّ مفتاح API بصلاحية التداول فقط، واقفل صلاحية السحب، واربطه بعنوان IP جهازك. بعدها حط المفاتيح في متغيرات البيئة على جهازك:
+
+```bash
+export BINANCE_API_KEY=... BINANCE_API_SECRET=...
+```
+
+**تنبيهات تيليجرام (اختياري):**
+
+```bash
+export TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=...
+```
+
 ## الاختبارات
 
 ```bash
