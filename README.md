@@ -15,19 +15,23 @@
 - بايثون 3.9 أو أحدث، بدون مكتبات إضافية.
 - ما فيه أي تداول حقيقي. كل أمر يحتاج `--yes`، ويمر على قواعد المخاطر قبل التنفيذ.
 
-## التثبيت
+## التثبيت (بدون أوامر)
 
-داخل Claude Code:
+1. من صفحة المستودع على GitHub اضغط **Code**، بعدها **Download ZIP**، وفك الضغط.
+2. ثبّت حسب جهازك:
+   - **ماك:** اضغط مرتين على `install-mac.command`. إذا طلع لك تحذير، اضغط بالزر الأيمن واختر **Open**.
+   - **ويندوز:** اضغط مرتين على `install-windows.bat`.
+3. للاستخدام عندك طريقتين:
+   - **من Claude Code:** قل "سوبر رامي، وش أشتري اليوم؟"
+   - **من القائمة:** اضغط مرتين على `start-mac.command` أو `start-windows.bat`، وتختار من قائمة بالعربي بالأرقام.
+
+## ⭐ وش أشتري اليوم؟
 
 ```bash
-git clone <رابط المستودع> super-rami
+python3 ~/.claude/skills/super-rami/scripts/advisor.py --budget 2000
 ```
 
-```bash
-mkdir -p ~/.claude/skills && cp -r super-rami/skills/super-rami ~/.claude/skills/
-```
-
-بعدها قل لـ Claude: "سوبر رامي، حلل لي سهم أرامكو".
+يفحص الأسهم الأمريكية والسعودية والعملات، ويعطيك قائمة واحدة فيها وش تشتري، وليش، وكم تحط في كل وحدة، ووين تطلع إذا نزل السعر.
 
 ## أول تشغيل
 
@@ -58,7 +62,7 @@ python3 ~/.claude/skills/super-rami/scripts/paper.py init --usd 10000 --sar 3750
 ### خطوات التجهيز
 
 1. افتح حساب في [Interactive Brokers](https://www.interactivebrokers.com)، وفعّل صلاحية تداول الخيارات (Options).
-2. اشترك في بيانات مؤشرات CBOE عشان تحصل أسعار SPX لحظية.
+2. اشترك في بيانات مؤشرات CBOE وبيانات عقود الخيارات الأمريكية (OPRA) عشان تحصل أسعار لحظية.
 3. حمّل **IB Gateway** أو **TWS**، وسجّل دخول على **الحساب التجريبي (Paper)**.
 4. فعّل الـ API من: Configure ← API ← Settings ← Enable ActiveX and Socket Clients. المنفذ 7497 لـ TWS أو 4002 لـ Gateway.
 5. ثبّت المكتبة:

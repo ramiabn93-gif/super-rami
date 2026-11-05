@@ -528,3 +528,42 @@ class TestCryptoAutopick(unittest.TestCase):
             self.assertTrue(r["ok"] and r["return"] > 0)
             self.assertIn(pk["assign"][s], cs.STRATEGIES)
         self.assertEqual(len(pk["report"]), 3)
+
+
+# ---------------------------------------------------------------- advisor
+import advisor  # noqa: E402
+
+
+class TestAdvisor(unittest.TestCase):
+    def test_stock_ideas_and_allocation(self):
+        def fake(sym, range_="1y"):
+            drift = 1.002 if sym in ("AAPL", "MSFT", "2222", "1120") else 0.999
+            closes = [100 * drift ** i * (1 + 0.003 * ((-1) ** i)) for i in range(260)]
+            return [(i, c, 0) for i, c in enumerate(closes)], {}
+        us = advisor.stock_ideas("us", 3, fetch=fake)
+        sa = advisor.stock_ideas("sa", 3, fetch=fake)
+        self.assertEqual({i["symbol"] for i in us}, {"AAPL", "MSFT"})
+        self.assertIn("أرامكو", " ".join(i["name"] for i in sa))
+        crypto = [{"action": "اشتر الحين", "meme": False, "currency": "USD"},
+                  {"action": "اشتر الحين", "meme": True, "currency": "USD"},
+                  {"action": "راقب", "meme": False, "currency": "USD"}]
+        advisor.allocate({"us": us, "sa": sa, "crypto": crypto}, 3000)
+        self.assertAlmostEqual(sum(i["amount_usd"] for i in us), 1000, delta=0.05)
+        self.assertAlmostEqual(sum(i["amount_local"] for i in sa), 1000 * 3.75, delta=0.2)   # riyals
+        self.assertAlmostEqual(crypto[0]["amount_usd"], 666.67, delta=0.01)                   # meme gets half
+        self.assertNotIn("amount_usd", crypto[2])                                             # watch only
+
+    def test_crypto_ideas_buy_now_and_watch(self):
+        full = common.load_config()
+        full["crypto"] = {"last_autopick": "2026-11-05", "strong": ["BTCUSDT"], "memes": ["PEPEUSDT"],
+                          "assign": {"BTCUSDT": "trend", "PEPEUSDT": "breakout"}}
+        common.save_config(full)
+        self.addCleanup(lambda: (full.pop("crypto"), common.save_config(full)))
+        up = crypto_bars(400, seed=2, drift=0.002)
+        orig = cs.signal
+        cs.signal = lambda name, *a: 1 if name == "breakout" else 0
+        self.addCleanup(setattr, cs, "signal", orig)
+        ideas = advisor.crypto_ideas(fetch_bars=lambda s: up)
+        acts = {i["symbol"]: i["action"] for i in ideas}
+        self.assertEqual(acts, {"PEPEUSDT": "اشتر الحين", "BTCUSDT": "راقب"})
+        self.assertTrue(all(i["stop"] < i["price"] for i in ideas))
