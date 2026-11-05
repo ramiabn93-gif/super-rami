@@ -168,15 +168,15 @@ class TestAutoGate(unittest.TestCase):
         self.t = dt.datetime(2026, 11, 5, 11, 0, tzinfo=strategy.NY)
 
     def test_allows_normal_trade(self):
-        self.assertEqual(autotrader.gate(self.state, self.cfg, self.t, 3.0, 2.9, []), [])
+        self.assertEqual(autotrader.gate(self.state, self.cfg, self.t, 1.9, 1.8, []), [])
 
     def test_blocks(self):
         g = autotrader.gate
         self.assertTrue(g(self.state, self.cfg, self.t.replace(hour=9, minute=35), 3.0, 2.9, []))
         self.assertTrue(g(self.state, self.cfg, self.t.replace(hour=15, minute=45), 3.0, 2.9, []))
         self.assertTrue(g({"trades": 3, "pnl": 0}, self.cfg, self.t, 3.0, 2.9, []))
-        self.assertTrue(g({"trades": 0, "pnl": -300}, self.cfg, self.t, 3.0, 2.9, []))
-        self.assertTrue(g(self.state, self.cfg, self.t, 6.0, 5.9, []))       # 600$ > 500$
+        self.assertTrue(g({"trades": 0, "pnl": -100}, self.cfg, self.t, 3.0, 2.9, []))
+        self.assertTrue(g(self.state, self.cfg, self.t, 2.5, 2.4, []))       # 250$ > 200$
         self.assertTrue(g(self.state, self.cfg, self.t, 3.0, 2.0, []))       # wide spread
         self.assertTrue(g(self.state, self.cfg, self.t, 3.0, 2.9, ["pos"]))  # one at a time
         self.assertTrue(g(self.state, self.cfg, self.t, None, None, []))
@@ -459,8 +459,8 @@ class TestCryptoBot(unittest.TestCase):
 
 
 class TestSpxCapital(unittest.TestCase):
-    def test_limits_from_2000_account(self):
+    def test_limits_from_1000_account(self):
         c = autotrader.resolve(autotrader.DEFAULTS)
-        self.assertEqual((c["max_premium_usd"], c["max_daily_loss_usd"]), (400, 200))
+        self.assertEqual((c["max_premium_usd"], c["max_daily_loss_usd"]), (200, 100))
         c = autotrader.resolve(dict(autotrader.DEFAULTS, account_usd=5000))
         self.assertEqual((c["max_premium_usd"], c["max_daily_loss_usd"]), (1000, 500))

@@ -36,10 +36,10 @@ DEFAULTS = {
     "host": "127.0.0.1",
     "port": 7497,                 # TWS paper 7497, IB Gateway paper 4002
     "client_id": 17,
-    "account_usd": 2000,          # Rami's trading capital for SPX
+    "account_usd": 1000,          # Rami's trading capital for SPX
     "qty": 1,                     # contracts per trade
-    "max_premium_pct": 20,        # max cost of one trade, % of account (2000 -> 400$)
-    "max_daily_loss_pct": 10,     # stop for the day after losing this % (2000 -> 200$)
+    "max_premium_pct": 20,        # max cost of one trade, % of account (1000 -> 200$)
+    "max_daily_loss_pct": 10,     # stop for the day after losing this % (1000 -> 100$)
     "max_premium_usd": None,      # optional fixed override of max_premium_pct
     "max_daily_loss_usd": None,   # optional fixed override of max_daily_loss_pct
     "stop_loss_pct": 50,          # exit if premium falls this % from entry
