@@ -36,12 +36,15 @@ DEFAULTS = {
     "host": "127.0.0.1",
     "port": 7497,                 # TWS paper 7497, IB Gateway paper 4002
     "client_id": 17,
+    "account_usd": 2000,          # Rami's trading capital for SPX
     "qty": 1,                     # contracts per trade
-    "max_premium_usd": 500,       # max cost of one trade (price x 100 x qty)
+    "max_premium_pct": 20,        # max cost of one trade, % of account (2000 -> 400$)
+    "max_daily_loss_pct": 10,     # stop for the day after losing this % (2000 -> 200$)
+    "max_premium_usd": None,      # optional fixed override of max_premium_pct
+    "max_daily_loss_usd": None,   # optional fixed override of max_daily_loss_pct
     "stop_loss_pct": 50,          # exit if premium falls this % from entry
     "take_profit_pct": 100,       # exit if premium rises this % from entry
     "max_trades_per_day": 3,
-    "max_daily_loss_usd": 300,    # stop trading for the day after this loss
     "max_spread_pct": 15,         # skip if (ask-bid)/ask is wider than this
     "start": "09:45",             # New York time
     "last_entry": "15:30",
@@ -50,10 +53,21 @@ DEFAULTS = {
 }
 
 
+def resolve(cfg):
+    """Turn % of account into dollar limits (fixed *_usd values win if set)."""
+    cfg = dict(cfg)
+    acct = float(cfg["account_usd"])
+    if not cfg.get("max_premium_usd"):
+        cfg["max_premium_usd"] = acct * cfg["max_premium_pct"] / 100
+    if not cfg.get("max_daily_loss_usd"):
+        cfg["max_daily_loss_usd"] = acct * cfg["max_daily_loss_pct"] / 100
+    return cfg
+
+
 def auto_cfg():
     cfg = dict(DEFAULTS)
     cfg.update(load_config().get("spx_auto", {}))
-    return cfg
+    return resolve(cfg)
 
 
 def hhmm(s):
@@ -78,7 +92,7 @@ def gate(state, cfg, now, ask, bid, open_positions):
     if state["trades"] >= cfg["max_trades_per_day"]:
         reasons.append(f"وصلنا الحد اليومي {cfg['max_trades_per_day']} صفقات.")
     if state["pnl"] <= -abs(cfg["max_daily_loss_usd"]):
-        reasons.append(f"وصلنا حد الخسارة اليومي {cfg['max_daily_loss_usd']}$.")
+        reasons.append(f"وصلنا حد الخسارة اليومي {cfg['max_daily_loss_usd']:,.0f}$.")
     if open_positions:
         reasons.append("فيه صفقة مفتوحة، صفقة وحدة بس في كل مرة.")
     if not ask or ask <= 0:
@@ -86,7 +100,7 @@ def gate(state, cfg, now, ask, bid, open_positions):
     else:
         cost = ask * 100 * cfg["qty"]
         if cost > cfg["max_premium_usd"]:
-            reasons.append(f"تكلفة الصفقة {cost:,.0f}$ أكبر من الحد {cfg['max_premium_usd']}$.")
+            reasons.append(f"تكلفة الصفقة {cost:,.0f}$ أكبر من الحد {cfg['max_premium_usd']:,.0f}$.")
         if bid is not None and (ask - bid) / ask * 100 > cfg["max_spread_pct"]:
             reasons.append(f"الفرق بين bid و ask واسع ({bid:.2f}/{ask:.2f}).")
     return reasons

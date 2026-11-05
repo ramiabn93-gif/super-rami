@@ -163,7 +163,7 @@ class TestOptionsMath(unittest.TestCase):
 
 class TestAutoGate(unittest.TestCase):
     def setUp(self):
-        self.cfg = dict(autotrader.DEFAULTS)
+        self.cfg = autotrader.resolve(autotrader.DEFAULTS)
         self.state = {"trades": 0, "pnl": 0.0}
         self.t = dt.datetime(2026, 11, 5, 11, 0, tzinfo=strategy.NY)
 
@@ -194,7 +194,7 @@ class TestAutoGate(unittest.TestCase):
 
 class TestSimLoop(unittest.TestCase):
     def test_sim_trades_once_per_day_and_closes(self):
-        cfg = dict(autotrader.DEFAULTS, max_premium_usd=5000, max_daily_loss_usd=10000)
+        cfg = autotrader.resolve(dict(autotrader.DEFAULTS, max_premium_usd=5000, max_daily_loss_usd=10000))
         bars = synth.make(4) + synth.make(5)
         b = autotrader.SimBroker(bars)
         autotrader.trade_loop(b, cfg, common.load_config()["spx_strategy"], persist=False)
@@ -204,7 +204,7 @@ class TestSimLoop(unittest.TestCase):
 
     def test_sim_respects_premium_limit(self):
         b = autotrader.SimBroker(synth.make())
-        autotrader.trade_loop(b, dict(autotrader.DEFAULTS, max_premium_usd=100),
+        autotrader.trade_loop(b, autotrader.resolve(dict(autotrader.DEFAULTS, max_premium_usd=100)),
                               common.load_config()["spx_strategy"], persist=False)
         self.assertEqual(b.closed, [])
 
@@ -456,3 +456,11 @@ class TestCryptoBot(unittest.TestCase):
             crypto_bot.check_config(dict(cfg, testnet=False))
         with self.assertRaises(common.RamiError):
             crypto_bot.check_config(dict(cfg, leverage=20))
+
+
+class TestSpxCapital(unittest.TestCase):
+    def test_limits_from_2000_account(self):
+        c = autotrader.resolve(autotrader.DEFAULTS)
+        self.assertEqual((c["max_premium_usd"], c["max_daily_loss_usd"]), (400, 200))
+        c = autotrader.resolve(dict(autotrader.DEFAULTS, account_usd=5000))
+        self.assertEqual((c["max_premium_usd"], c["max_daily_loss_usd"]), (1000, 500))

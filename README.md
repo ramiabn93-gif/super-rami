@@ -82,10 +82,11 @@ python3 ~/.claude/skills/super-rami/scripts/autotrader.py ibkr
 |---|---|
 | `mode` | `paper`: يرفض الاتصال إذا الحساب حقيقي |
 | `qty` | 1 عقد |
-| `max_premium_usd` | 500$ كحد أعلى لتكلفة الصفقة |
+| `account_usd` | 2,000$ (رأس المال) |
+| `max_premium_pct` | 20% = 400$ كحد أعلى لتكلفة الصفقة |
 | `stop_loss_pct` / `take_profit_pct` | 50% / 100% من سعر الدخول |
 | `max_trades_per_day` | 3 |
-| `max_daily_loss_usd` | 300$، بعدها يوقف الدخول لنهاية اليوم |
+| `max_daily_loss_pct` | 10% = 200$، بعدها يوقف الدخول لنهاية اليوم |
 | `max_spread_pct` | 15% |
 | `start` / `last_entry` / `flatten` | 09:45 / 15:30 / 15:50 بتوقيت نيويورك |
 
