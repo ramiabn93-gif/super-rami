@@ -136,3 +136,128 @@ class TestStrategy(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------- auto trading
+import datetime as dt  # noqa: E402
+import types  # noqa: E402
+
+import autotrader  # noqa: E402
+import options_math  # noqa: E402
+
+
+class TestOptionsMath(unittest.TestCase):
+    def test_bs(self):
+        c = options_math.bs_price(5000, 5000, 120, "C")
+        p = options_math.bs_price(5000, 5000, 120, "P")
+        self.assertGreater(c, 0)
+        self.assertAlmostEqual(c, p, delta=1.0)               # ATM call ~ put
+        self.assertEqual(options_math.bs_price(5010, 5000, 0, "C"), 10)
+        self.assertLess(options_math.bs_price(5000, 5020, 30, "C"), options_math.bs_price(5000, 5020, 300, "C"))
+
+    def test_ticks(self):
+        self.assertEqual(options_math.round_tick(2.43), 2.40)
+        self.assertEqual(options_math.round_tick(2.43, up=True), 2.45)
+        self.assertEqual(options_math.round_tick(11.04, up=True), 11.10)
+
+
+class TestAutoGate(unittest.TestCase):
+    def setUp(self):
+        self.cfg = dict(autotrader.DEFAULTS)
+        self.state = {"trades": 0, "pnl": 0.0}
+        self.t = dt.datetime(2026, 11, 5, 11, 0, tzinfo=strategy.NY)
+
+    def test_allows_normal_trade(self):
+        self.assertEqual(autotrader.gate(self.state, self.cfg, self.t, 3.0, 2.9, []), [])
+
+    def test_blocks(self):
+        g = autotrader.gate
+        self.assertTrue(g(self.state, self.cfg, self.t.replace(hour=9, minute=35), 3.0, 2.9, []))
+        self.assertTrue(g(self.state, self.cfg, self.t.replace(hour=15, minute=45), 3.0, 2.9, []))
+        self.assertTrue(g({"trades": 3, "pnl": 0}, self.cfg, self.t, 3.0, 2.9, []))
+        self.assertTrue(g({"trades": 0, "pnl": -300}, self.cfg, self.t, 3.0, 2.9, []))
+        self.assertTrue(g(self.state, self.cfg, self.t, 6.0, 5.9, []))       # 600$ > 500$
+        self.assertTrue(g(self.state, self.cfg, self.t, 3.0, 2.0, []))       # wide spread
+        self.assertTrue(g(self.state, self.cfg, self.t, 3.0, 2.9, ["pos"]))  # one at a time
+        self.assertTrue(g(self.state, self.cfg, self.t, None, None, []))
+
+    def test_kill_switch(self):
+        open(autotrader.kill_switch_path(), "w").close()
+        try:
+            self.assertTrue(autotrader.gate(self.state, self.cfg, self.t, 3.0, 2.9, []))
+        finally:
+            os.remove(autotrader.kill_switch_path())
+
+    def test_bracket(self):
+        self.assertEqual(autotrader.bracket_prices(4.0, self.cfg), (8.0, 2.0))
+
+
+class TestSimLoop(unittest.TestCase):
+    def test_sim_trades_once_per_day_and_closes(self):
+        cfg = dict(autotrader.DEFAULTS, max_premium_usd=5000, max_daily_loss_usd=10000)
+        bars = synth.make(4) + synth.make(5)
+        b = autotrader.SimBroker(bars)
+        autotrader.trade_loop(b, cfg, common.load_config()["spx_strategy"], persist=False)
+        self.assertEqual(len(b.closed), 2)
+        self.assertEqual({t["day"] for t in b.closed}, {dt.date(2026, 11, 4), dt.date(2026, 11, 5)})
+        self.assertFalse(b.open_positions())
+
+    def test_sim_respects_premium_limit(self):
+        b = autotrader.SimBroker(synth.make())
+        autotrader.trade_loop(b, dict(autotrader.DEFAULTS, max_premium_usd=100),
+                              common.load_config()["spx_strategy"], persist=False)
+        self.assertEqual(b.closed, [])
+
+
+class _FakeIB:
+    account = "U1234567"
+
+    def connect(self, *a, **k):
+        pass
+
+    def managedAccounts(self):
+        return [self.account]
+
+    def disconnect(self):
+        self.disconnected = True
+
+    def qualifyContracts(self, *c):
+        return list(c)
+
+    def reqPnL(self, acct):
+        return types.SimpleNamespace(dailyPnL=float("nan"))
+
+    def isConnected(self):
+        return True
+
+
+class TestIBKRSafety(unittest.TestCase):
+    def setUp(self):
+        fake = types.ModuleType("ib_async")
+        fake.IB = _FakeIB
+        fake.Index = lambda *a, **k: object()
+        sys.modules["ib_async"] = fake
+        import broker_ibkr
+        self.mod = broker_ibkr
+
+    def tearDown(self):
+        sys.modules.pop("ib_async", None)
+        os.environ.pop("SUPER_RAMI_LIVE", None)
+
+    def test_real_account_refused_in_paper_mode(self):
+        _FakeIB.account = "U1234567"
+        with self.assertRaises(common.RamiError):
+            self.mod.IBKRBroker(dict(autotrader.DEFAULTS))
+
+    def test_paper_account_ok(self):
+        _FakeIB.account = "DU1234567"
+        b = self.mod.IBKRBroker(dict(autotrader.DEFAULTS))
+        self.assertTrue(b.is_paper)
+        self.assertEqual(b.daily_pnl(), 0.0)
+
+    def test_live_needs_env(self):
+        _FakeIB.account = "U1234567"
+        with self.assertRaises(common.RamiError):
+            self.mod.IBKRBroker(dict(autotrader.DEFAULTS, mode="live"))
+        os.environ["SUPER_RAMI_LIVE"] = "I_UNDERSTAND"
+        self.assertFalse(self.mod.IBKRBroker(dict(autotrader.DEFAULTS, mode="live")).is_paper)
